@@ -13,7 +13,7 @@ yarn deploy # To deploy contract
 
 To deploy a contract, follow these steps:
 
-1. Define the [`contract.tact`](./sources/contract.tact) file that will be used as entry point of your contract.
+1. Define the [`contract.tact`](./sources/jetton_minter.tact) file that will be used as entry point of your contract.
 2. Customize the [`contract.deploy.ts`](./sources/contract.deploy.ts) file based on your `contract.tact` to generate a deployment link. It is crucial to ensure the proper invocation of the `init()` function within the contract.
 
 If you rename `contract.tact`, make sure to update [`tact.config.json`](./tact.config.json) correspondingly. Refer to the [Tact Documentation](https://docs.tact-lang.org/language/guides/config) for detailed information.
