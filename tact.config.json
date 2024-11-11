@@ -1,0 +1,20 @@
+{
+  "projects": [
+    {
+      "name": "JettonMinter",
+      "path": "./contracts/jetton_minter.tact",
+      "output": "./tactOut/",
+      "options": {
+        "debug": true
+      }
+    },
+    {
+      "name": "JettonWallet",
+      "path": "./contracts/jetton_wallet.tact",
+      "output": "./tactOut/",
+      "options": {
+        "debug": true
+      }
+    }
+  ]
+}
