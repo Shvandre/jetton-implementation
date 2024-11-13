@@ -1,4 +1,5 @@
 import "@stdlib/ownable";
+import "@stdlib/deploy";
 import "./jetton_wallet";
 import "./messages";
 
@@ -12,7 +13,7 @@ struct JettonMasterState {
     jettonWalletCode: Cell;
 }
 
-contract JettonMinter with OwnableTransferable {
+contract JettonMinter with OwnableTransferable, Deployable {
     totalSupply: Int as coins;
     mintable: Bool;
     owner: Address;

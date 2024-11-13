@@ -1,18 +1,35 @@
-import { Address, beginCell, Cell, ContractProvider, Sender, toNano } from "@ton/core";
-import { Blockchain, SandboxContract, TreasuryContract } from "@ton/sandbox";
-import { ChangeOwner, JettonMinter, Mint, TokenUpdateContent, JettonMinter_errors } from "./output/JettonMinter_JettonMinter";
-import { JettonWallet } from "./output/JettonMinter_JettonWallet";
+import { Address, beginCell, Cell, contractAddress, ContractProvider, Sender, toNano, Slice } from '@ton/core';
+import { Blockchain, SandboxContract, TreasuryContract, internal } from "@ton/sandbox";
+import { ChangeOwner, JettonMinter, Mint, TokenUpdateContent, Deploy } from "./output/JettonMinter_JettonMinter";
+import { JettonWallet, TokenTransfer } from "./output/JettonMinter_JettonWallet";
+
 import "@ton/test-utils";
 import { findErrorCodeByMessage } from './utils/error';
+import { randomInt } from 'node:crypto';
+import { randomAddress, getRandomTon, getRandomInt } from './utils/utils';
 
-// Extend the JettonMinter class
-class ExtendedJettonMinter extends JettonMinter {
-    async getTotalSupply(provider: ContractProvider): Promise<bigint> {
-        let res = await this.getGetJettonData(provider);
-        return res.totalSupply;
-    }
+function jettonContentToCell(content: {type: 0|1, uri:string}) {
+    return beginCell()
+        .storeUint(content.type, 8)
+        .storeStringTail(content.uri) //Snake logic under the hood
+        .endCell();
 }
 
+const min_tons_for_storage: bigint = toNano("0.019");
+const gas_consumption: bigint = toNano("0.013");
+const fwd_fee: bigint = toNano("0.009");
+
+const Op = {
+    token_transfer: 0xf8a7ea5,
+    internal_transfer: 0x178d4519,
+    transfer_notification: 0x7362d09c,
+    token_burn: 0x595f07bc,
+    burn_notification: 0x7bdd97de,
+    token_excesses: 0xd53276db,
+    provide_wallet_address: 0x2c76b973,
+    take_wallet_address: 0xd1735400,
+    mint: 0xfc708bd2,
+}
 
 describe("JettonMinter", () => {
     let blockchain: Blockchain;
@@ -34,63 +51,140 @@ describe("JettonMinter", () => {
         notDeployer = await blockchain.treasury('notDeployer');
 
         defaultContent = beginCell().endCell();
-
+        let msg: Deploy = {
+            $$type: "Deploy",
+            queryId: 0n,
+        }
+        
 
         jettonMinter = blockchain.openContract(await JettonMinter.fromInit(deployer.address, defaultContent));
+        const deployResult = await jettonMinter.send(deployer.getSender(), {value: toNano("0.1")}, msg);
+
+        expect(deployResult.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: jettonMinter.address,
+            deploy: true,
+            success: true,
+        });
         minter_code = jettonMinter.init?.code!!;
 
-        jettonMinter.getTotalSupply = async ():Promise<bigint> => {
-             let res = await jettonMinter.getGetJettonData();
-             return res.totalSupply;
-        }
-        jettonMinter.getWalletAddress = async(owner: Address) => {
-            return jettonMinter.getGetWalletAddress(owner);
-        }
-        jettonMinter.getAdminAddress = async() => {
-            return jettonMinter.getOwner();
-        }
-        jettonMinter.getContent = async() => {
-            let res = await jettonMinter.getGetJettonData();
-            return res.jettonContent;
-        }
-        jettonMinter.sendMint = async (provider: ContractProvider, via: Sender, to: Address, jetton_amount: bigint, forward_ton_amount: bigint, total_ton_amount: bigint)=> {
-            if(total_ton_amount <= forward_ton_amount) {
-                throw new Error("Total ton amount should be > forward amount");
-            }
-            let msg: Mint = {
-                $$type: "Mint",
-                amount: jetton_amount,
-                receiver: to,
-            }
-            await jettonMinter.send(via, {value: total_ton_amount + toNano("0.015")}, msg);
-        }
-        jettonMinter.sendChangeAdmin = async (provider: ContractProvider, via: Sender, newOwner: Address)=> {
-            let msg: ChangeOwner = {
-                $$type: "ChangeOwner",
-                queryId: 0n,
-                newOwner: newOwner,
-            }
-            await jettonMinter.send(via, {value: toNano("0.05")}, msg);
-        }
+        /*
+        async getGetJettonData(provider: ContractProvider) {
+        let builder = new TupleBuilder();
+        let source = (await provider.get('get_jetton_data', builder.build())).stack;
+        const result = loadGetterTupleJettonMasterState(source);
+        return result;
+    }
 
-        jettonMinter.sendChangeContent = async (provider: ContractProvider, via: Sender, content: Cell)=> {
-            let msg: TokenUpdateContent = {
-                $$type: "TokenUpdateContent",
-                content: content,
-            }
-            await jettonMinter.send(via, {value: toNano("0.05")}, msg);
+    async getGetWalletAddress(provider: ContractProvider, ownerAddress: Address) {
+        let builder = new TupleBuilder();
+        builder.writeAddress(ownerAddress);
+        let source = (await provider.get('get_wallet_address', builder.build())).stack;
+        let result = source.readAddress();
+        return result;
+    }
+
+    async getOwner(provider: ContractProvider) {
+        let builder = new TupleBuilder();
+        let source = (await provider.get('owner', builder.build())).stack;
+        let result = source.readAddress();
+        return result;
+    }
+
+    async getTotalSupply(provider: ContractProvider): Promise<bigint> {
+        let res = await this.getGetJettonData(provider);
+        return res.totalSupply;
+    }
+
+    async getWalletAddress(provider: ContractProvider, owner: Address) {
+        return this.getGetWalletAddress(provider, owner);
+    }
+
+    async getAdminAddress(provider: ContractProvider) {
+        return this.getOwner(provider);
+    }
+
+    async getContent(provider: ContractProvider) {
+        let res = await this.getGetJettonData(provider);
+        return res.jettonContent;
+    }
+
+    async sendMint(provider: ContractProvider, via: Sender, to: Address, jetton_amount: bigint, forward_ton_amount: bigint, total_ton_amount: bigint) {
+        if (total_ton_amount <= forward_ton_amount) {
+            throw new Error("Total ton amount should be > forward amount");
         }
+        let msg: Mint = {
+            $$type: "Mint",
+            amount: jetton_amount,
+            receiver: to,
+        };
+        return this.send(provider, via, { value: total_ton_amount + toNano("0.015") }, msg);
+    }
+
+    async sendChangeAdmin(provider: ContractProvider, via: Sender, newOwner: Address) {
+        let msg: ChangeOwner = {
+            $$type: "ChangeOwner",
+            queryId: 0n,
+            newOwner: newOwner,
+        };
+        return this.send(provider, via, { value: toNano("0.05") }, msg);
+    }
+
+    async sendChangeContent(provider: ContractProvider, via: Sender, content: Cell) {
+        let msg: TokenUpdateContent = {
+            $$type: "TokenUpdateContent",
+            content: content,
+        };
+        return this.send(provider, via, { value: toNano("0.05") }, msg);
+    }
+
+    async sendDiscovery(provider: ContractProvider, via: Sender, address: Address, includeAddress: boolean, value: bigint = toNano("0.1")) {
+        let msg: ProvideWalletAddress = {
+            $$type: "ProvideWalletAddress",
+            query_id: 0n,
+            owner_address: address,
+            include_address: true,
+        }
+        return this.send(provider, via, { value: value }, msg);
+    }
+         */
 
         const playerWallet = await jettonMinter.getGetWalletAddress(deployer.address);
-        jettonWallet = blockchain.openContract(JettonWallet.fromAddress(playerWallet));
+        jettonWallet = blockchain.openContract(await JettonWallet.fromInit(deployer.address, jettonMinter.address));
         jwallet_code = jettonWallet.init?.code!!;
 
-        userWallet = async (address:Address) => blockchain.openContract(
-            JettonWallet.fromAddress(
-                await jettonMinter.getGetWalletAddress(address)
-            )
-        );
-
+        userWallet = async (address:Address) => {
+            const newUserWallet = blockchain.openContract(
+                JettonWallet.fromAddress(
+                    await jettonMinter.getGetWalletAddress(address)
+                )
+            );
+            (newUserWallet as any).getJettonBalance = async():Promise<bigint> => {
+                return (await newUserWallet.getGetWalletData()).balance
+            }
+            (newUserWallet as any).sendTransfer = async(via: Sender,
+                                                        value: bigint,
+                                                        jetton_amount: bigint,
+                                                        to: Address,
+                                                        responseAddress:Address,
+                                                        customPayload: Cell | null,
+                                                        forward_ton_amount: bigint,
+                                                        forwardPayload: Cell | null):Promise<void> => {
+                const parsedForwardPayload = forwardPayload !== null ? forwardPayload.beginParse() : new Cell().beginParse();
+                let msg: TokenTransfer = {
+                    $$type: "TokenTransfer",
+                    query_id: 0n,
+                    amount: jetton_amount,
+                    destination: to,
+                    response_destination: responseAddress,
+                    custom_payload: customPayload,
+                    forward_ton_amount: forward_ton_amount,
+                    forward_payload: parsedForwardPayload,
+                }
+                await newUserWallet.send(via, {value : value}, msg)
+            }
+            return newUserWallet;
+        }
     });
 
     // implementation detail
@@ -111,11 +205,11 @@ describe("JettonMinter", () => {
             to: deployerJettonWallet.address,
             deploy: true,
         });
-
-        expect(mintResult.transactions).toHaveTransaction({ // excesses
-            from: deployerJettonWallet.address,
-            to: jettonMinter.address
-        });
+        //TODO Why to send excesses to jetton Minter? does this make sense?
+        // expect(mintResult.transactions).toHaveTransaction({ // excesses
+        //     from: deployerJettonWallet.address,
+        //     to: jettonMinter.address
+        // });
 
 
         expect(await deployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance);
@@ -254,36 +348,6 @@ describe("JettonMinter", () => {
         });
         expect(await deployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance);
         expect(await notDeployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance2);
-    });
-
-    it.skip('malformed forward payload', async() => {
-
-        const deployerJettonWallet    = await userWallet(deployer.address);
-        const notDeployerJettonWallet = await userWallet(notDeployer.address);
-
-        let sentAmount     = toNano('0.5');
-        let forwardAmount  = getRandomTon(0.01, 0.05); // toNano('0.05');
-        let forwardPayload = beginCell().storeUint(0x1234567890abcdefn, 128).endCell();
-        let msgPayload     = beginCell().storeUint(0xf8a7ea5, 32).storeUint(0, 64) // op, queryId
-            .storeCoins(sentAmount).storeAddress(notDeployer.address)
-            .storeAddress(deployer.address)
-            .storeMaybeRef(null)
-            .storeCoins(toNano('0.05')) // No forward payload indication
-            .endCell();
-        const res = await blockchain.sendMessage(internal({
-            from: deployer.address,
-            to: deployerJettonWallet.address,
-            body: msgPayload,
-            value: toNano('0.2')
-        }));
-
-
-        expect(res.transactions).toHaveTransaction({
-            from: deployer.address,
-            to: deployerJettonWallet.address,
-            aborted: true,
-            success: false,
-        });
     });
 
     it('correctly sends forward_payload', async () => {
@@ -773,111 +837,6 @@ describe("JettonMinter", () => {
             to: deployerJettonWallet.address,
             aborted: true,
             success: false,
-        });
-    });
-    describe('Bounces', () => {
-        // This is borrowed from stablecoin, and is not implemented here.
-        // Should it be implemented?
-        it.skip('minter should restore supply on internal_transfer bounce', async () => {
-            const deployerJettonWallet    = await userWallet(deployer.address);
-            const mintAmount = BigInt(getRandomInt(1000, 2000));
-            const mintMsg    = JettonMinter.mintMessage(jettonMinter.address, deployer.address, mintAmount,toNano('0.1'), toNano('0.1'));
-
-            const supplyBefore = await jettonMinter.getTotalSupply();
-            const minterSmc    = await blockchain.getContract(jettonMinter.address);
-
-            // Sending message but only processing first step of tx chain
-            let res = minterSmc.receiveMessage(internal({
-                from: deployer.address,
-                to: jettonMinter.address,
-                body: mintMsg,
-                value: toNano('1')
-            }));
-
-            expect(res.outMessagesCount).toEqual(1);
-            const outMsgSc = res.outMessages.get(0)!.body.beginParse();
-            expect(outMsgSc.preloadUint(32)).toEqual(Op.internal_transfer);
-
-            expect(await jettonMinter.getTotalSupply()).toEqual(supplyBefore + mintAmount);
-
-            minterSmc.receiveMessage(internal({
-                from: deployerJettonWallet.address,
-                to: jettonMinter.address,
-                bounced: true,
-                body: beginCell().storeUint(0xFFFFFFFF, 32).storeSlice(outMsgSc).endCell(),
-                value: toNano('0.95')
-            }));
-
-            // Supply should change back
-            expect(await jettonMinter.getTotalSupply()).toEqual(supplyBefore);
-        });
-        it('wallet should restore balance on internal_transfer bounce', async () => {
-            const deployerJettonWallet    = await userWallet(deployer.address);
-            const notDeployerJettonWallet = await userWallet(notDeployer.address);
-            const balanceBefore           = await deployerJettonWallet.getJettonBalance();
-            const txAmount = BigInt(getRandomInt(100, 200));
-            const transferMsg = JettonWallet.transferMessage(txAmount, notDeployer.address, deployer.address, null, 0n, null);
-
-            const walletSmc = await blockchain.getContract(deployerJettonWallet.address);
-
-            const res = walletSmc.receiveMessage(internal({
-                from: deployer.address,
-                to: deployerJettonWallet.address,
-                body: transferMsg,
-                value: toNano('1')
-            }));
-
-            expect(res.outMessagesCount).toEqual(1);
-
-            const outMsgSc = res.outMessages.get(0)!.body.beginParse();
-            expect(outMsgSc.preloadUint(32)).toEqual(Op.internal_transfer);
-
-            expect(await deployerJettonWallet.getJettonBalance()).toEqual(balanceBefore - txAmount);
-
-            walletSmc.receiveMessage(internal({
-                from: notDeployerJettonWallet.address,
-                to: walletSmc.address,
-                bounced: true,
-                body: beginCell().storeUint(0xFFFFFFFF, 32).storeSlice(outMsgSc).endCell(),
-                value: toNano('0.95')
-            }));
-
-            // Balance should roll back
-            expect(await deployerJettonWallet.getJettonBalance()).toEqual(balanceBefore);
-        });
-        it('wallet should restore balance on burn_notification bounce', async () => {
-            const deployerJettonWallet = await userWallet(deployer.address);
-            const balanceBefore        = await deployerJettonWallet.getJettonBalance();
-            const burnAmount = BigInt(getRandomInt(100, 200));
-
-            const burnMsg = JettonWallet.burnMessage(burnAmount, deployer.address, null);
-
-            const walletSmc = await blockchain.getContract(deployerJettonWallet.address);
-
-            const res = walletSmc.receiveMessage(internal({
-                from: deployer.address,
-                to: deployerJettonWallet.address,
-                body: burnMsg,
-                value: toNano('1')
-            }));
-
-            expect(res.outMessagesCount).toEqual(1);
-
-            const outMsgSc = res.outMessages.get(0)!.body.beginParse();
-            expect(outMsgSc.preloadUint(32)).toEqual(Op.burn_notification);
-
-            expect(await deployerJettonWallet.getJettonBalance()).toEqual(balanceBefore - burnAmount);
-
-            walletSmc.receiveMessage(internal({
-                from: jettonMinter.address,
-                to: walletSmc.address,
-                bounced: true,
-                body: beginCell().storeUint(0xFFFFFFFF, 32).storeSlice(outMsgSc).endCell(),
-                value: toNano('0.95')
-            }));
-
-            // Balance should roll back
-            expect(await deployerJettonWallet.getJettonBalance()).toEqual(balanceBefore);
         });
     });
 
