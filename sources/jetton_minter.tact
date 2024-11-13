@@ -73,9 +73,11 @@ contract JettonMinter with OwnableTransferable, Deployable {
             value: 0,
             mode: SendRemainingValue,
             body: TakeWalletAddress{
-            query_id: msg.query_id,
-            wallet_address: targetJettonWallet,
-            owner_address: includedAddress
+                query_id: msg.query_id,
+                wallet_address: targetJettonWallet,
+                is_address_provided: includedAddress != null,
+                //I know it looks scary but it just makes Cell that consists only of includedAddress (and consists of nothing if includedAddress is null)
+                owner_address: includedAddress == null ? emptyCell() : beginCell().storeSlice(includedAddress!!.asSlice()).endCell()
             }.toCell()
         });
     }
@@ -90,18 +92,18 @@ contract JettonMinter with OwnableTransferable, Deployable {
         let winit: StateInit = self.getJettonWalletInit(msg.receiver);
 
         send(SendParameters{
-        to: contractAddress(winit),
-        value: 0,
-        bounce: true,
-        mode: SendRemainingValue,
-        body: TokenTransferInternal{
-        query_id: 0,
-        amount: msg.amount,
-        from: myAddress(),
-        response_destination: self.owner, // Owner is minting, so send excess to owner
-        forward_ton_amount: 0,
-        forward_payload: emptySlice()
-        }.toCell(),
+            to: contractAddress(winit),
+            value: 0,
+            bounce: true,
+            mode: SendRemainingValue,
+            body: TokenTransferInternal{
+                query_id: 0,
+                amount: msg.amount,
+                from: myAddress(),
+                response_destination: self.owner, // Owner is minting, so send excess to owner
+                forward_ton_amount: 0,
+                forward_payload: emptySlice()
+            }.toCell(),
         code: winit.code,
         data: winit.data
         });

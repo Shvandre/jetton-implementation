@@ -417,8 +417,8 @@ describe("JettonMinter", () => {
             body: beginCell().storeUint(Op.transfer_notification, 32).storeUint(0, 64) //default queryId
                 .storeCoins(sentAmount)
                 .storeAddress(deployer.address)
-                .storeUint(1, 1)
-                .storeRef(forwardPayload)
+                .storeUint(0, 1) //TODO modified here cause it serialises directly into cell, not in ref
+                .storeSlice(forwardPayload.beginParse())
                 .endCell()
         });
         expect(await deployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance - sentAmount);
@@ -480,7 +480,7 @@ describe("JettonMinter", () => {
     it('works with minimal ton amount', async () => {
         const deployerJettonWallet = await userWallet(deployer.address);
         let initialJettonBalance = await deployerJettonWallet.getJettonBalance();
-        const someAddress = Address.parse("EQD__________________________________________0vo");
+        const someAddress = Address.parse("UQBAmIBdInKmGzdTUMay9fqq8nyCZ9jnUh_yBFEE_cfediVD");
         const someJettonWallet = await userWallet(someAddress);
         let initialJettonBalance2 = await someJettonWallet.getJettonBalance();
         await deployer.send({value:toNano('1'), bounce:false, to: deployerJettonWallet.address});
@@ -626,8 +626,7 @@ describe("JettonMinter", () => {
         let initialJettonBalance   = await deployerJettonWallet.getJettonBalance();
         let initialTotalSupply     = await jettonMinter.getTotalSupply();
         let burnAmount   = toNano('0.01');
-        let fwd_fee      = 1492012n /*1500012n*/, gas_consumption = 15000000n;
-        let minimalFee   = fwd_fee + 2n*gas_consumption;
+        let minimalFee   = fwd_fee + 2n*gas_consumption + min_tons_for_storage; //TODO added + min_tons_for_storage
 
         const sendLow    = await deployerJettonWallet.sendBurn(deployer.getSender(), minimalFee, // ton amount
             burnAmount, deployer.address, null); // amount, response address, custom payload
@@ -716,7 +715,8 @@ describe("JettonMinter", () => {
         expect(discoveryResult.transactions).toHaveTransaction({
             from: jettonMinter.address,
             to: deployer.address,
-            body: beginCell().storeUint(Op.take_wallet_address, 32).storeUint(0, 64)
+            body: beginCell().storeUint(Op.take_wallet_address, 32)
+                .storeUint(0, 64)
                 .storeAddress(notDeployerJettonWallet.address)
                 .storeUint(1, 1)
                 .storeRef(beginCell().storeAddress(notDeployer.address).endCell())
