@@ -1,5 +1,5 @@
 import { Address, beginCell, Cell, contractAddress, ContractProvider, Sender, toNano, Slice } from '@ton/core';
-import { Blockchain, SandboxContract, TreasuryContract, internal } from "@ton/sandbox";
+import { Blockchain, SandboxContract, TreasuryContract, internal, printTransactionFees } from '@ton/sandbox';
 import {
     ChangeOwner,
     JettonMinter,
@@ -738,21 +738,20 @@ describe("JettonMinter", () => {
 
     it('Minimal discovery fee', async () => {
         // 5000 gas-units + msg_forward_prices.lump_price + msg_forward_prices.cell_price = 0.0061
-        const fwdFee     = 1464012n;
-        const minimalFee = fwdFee + 10000000n; // toNano('0.0061');
-
+        //const fwdFee     = 1464012n;
+        //const minimalFee = fwdFee + 10000000n; // toNano('0.0061');
+        const minimalFee = toNano("0.006613999");
         let discoveryResult = await jettonMinter.sendDiscovery(deployer.getSender(),
             notDeployer.address,
             false,
             minimalFee);
-
+        printTransactionFees(discoveryResult.transactions);
         expect(discoveryResult.transactions).toHaveTransaction({
             from: deployer.address,
             to: jettonMinter.address,
             aborted: true,
             success: false,
         });
-
         /*
          * Might be helpfull to have logical OR in expect lookup
          * Because here is what is stated in standard:
