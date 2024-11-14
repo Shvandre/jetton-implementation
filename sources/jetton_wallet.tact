@@ -29,6 +29,9 @@ contract JettonWallet with Ownable {
         //self.balance is unsigned when storing and loading (msg.amount is unsigned too),
         //however when doing calculations it's value may be negative, so the check is correct
         require(self.balance >= 0, "Invalid balance");
+
+        //We shouldn't send transfers to masterchain due to higher gas price
+        require(parseStdAddress(msg.destination.asSlice()).workchain == 0, "Invalid workchain of destination address");
         let init: StateInit = initOf JettonWallet(msg.destination, self.master);
 
         let wallet_address: Address = contractAddress(init);
@@ -106,32 +109,32 @@ contract JettonWallet with Ownable {
         self.requireOwner();
 
         let ctx: Context = context();
-        self.balance = (self.balance - msg.amount); // Update balance
+        self.balance -= msg.amount; // Update balance
         require(self.balance >= 0, "Invalid balance after burn");
         let fwd_fee: Int = ctx.readForwardFee(); // Gas checks
         require(ctx.value > ((fwd_fee + 2 * self.gasConsumption) + self.minTonsForStorage), "Invalid value - Burn");
         // Burn tokens
         send(SendParameters{
-        to: self.master,
-        value: 0,
-        mode: SendRemainingValue,
-        bounce: true,
-        body: TokenBurnNotification{
-        query_id: msg.query_id,
-        amount: msg.amount,
-        sender: self.owner,
-        response_destination: msg.response_destination
-        }.toCell()
+            to: self.master,
+            value: 0,
+            mode: SendRemainingValue,
+            bounce: true,
+            body: TokenBurnNotification{
+                query_id: msg.query_id,
+                amount: msg.amount,
+                sender: self.owner,
+                response_destination: msg.response_destination
+                }.toCell()
         }
         );
     }
 
     bounced(msg: bounced<TokenTransferInternal>){
-        self.balance = (self.balance + msg.amount);
+        self.balance += self.balance + msg.amount;
     }
 
     bounced(msg: bounced<TokenBurnNotification>){
-        self.balance = (self.balance + msg.amount);
+        self.balance += msg.amount;
     }
 
     get fun get_wallet_data(): JettonWalletData {

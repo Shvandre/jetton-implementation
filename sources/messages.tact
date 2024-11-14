@@ -74,9 +74,7 @@ message(0x2c76b973) ProvideWalletAddress {
 message(0xd1735400) TakeWalletAddress {
     query_id: Int as uint64;
     wallet_address: Address;
-    is_address_provided: Bool;
-    //owner_address: Slice as remaining. Address? = Maybe Address, so it is correct initialisation
-    owner_address: Cell; //It is Maybe ^Address, just encoded it like this
+    owner_address: Cell?; //It is Maybe ^Address, just encoded it like this
 }
 
 message(0xfc708bd2) Mint {

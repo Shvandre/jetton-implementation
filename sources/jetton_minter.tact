@@ -68,17 +68,23 @@ contract JettonMinter with OwnableTransferable, Deployable {
         if (msg.include_address) {
             includedAddress = msg.owner_address;
         }
+        let body: Builder = beginCell()
+        .storeUint(0xd1735400, 32)
+        .storeUint(msg.query_id, 64)
+        .storeSlice(targetJettonWallet.asSlice());
+        if (includedAddress != null) {
+            let includedAddressCell: Cell = beginCell().storeSlice(includedAddress!!.asSlice()).endCell();
+            body = body.storeBit(true); // Maybe bit
+            body = body.storeRef(includedAddressCell);
+            dump("Have included address");
+        } else {
+            body = body.storeBit(false); // Maybe bit
+        }
         send(SendParameters{
             to: sender(),
             value: 0,
             mode: SendRemainingValue,
-            body: TakeWalletAddress{
-                query_id: msg.query_id,
-                wallet_address: targetJettonWallet,
-                is_address_provided: includedAddress != null,
-                //I know it looks scary but it just makes Cell that consists only of includedAddress (and consists of nothing if includedAddress is null)
-                owner_address: includedAddress == null ? emptyCell() : beginCell().storeSlice(includedAddress!!.asSlice()).endCell()
-            }.toCell()
+            body: body.endCell()
         });
     }
     receive(msg: Mint) {
@@ -110,7 +116,6 @@ contract JettonMinter with OwnableTransferable, Deployable {
     }
 
     fun getJettonWalletByOwner(jetton_wallet_owner: Address): Address {
-        let ctx: Context = context();
         let jwInit: StateInit = self.getJettonWalletInit(jetton_wallet_owner);
         return contractAddress(jwInit);
     }
