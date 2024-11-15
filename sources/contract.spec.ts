@@ -182,7 +182,7 @@ describe("JettonMinter", () => {
                 forward_ton_amount: bigint,
                 forwardPayload: Cell | null
             ) => {
-                const parsedForwardPayload = forwardPayload ? forwardPayload.beginParse() : beginCell().endCell().beginParse();
+                const parsedForwardPayload = forwardPayload != null ? forwardPayload.beginParse() : new Cell().beginParse();
                 let msg: TokenTransfer = {
                     $$type: "TokenTransfer",
                     query_id: 0n,
@@ -390,7 +390,7 @@ describe("JettonMinter", () => {
         expect(await notDeployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance2);
     });
 
-    it('correctly sends forward_payload', async () => {
+    it('correctly sends forward_payload in place', async () => {
         const deployerJettonWallet = await userWallet(deployer.address);
         let initialJettonBalance = await deployerJettonWallet.getJettonBalance();
         const notDeployerJettonWallet = await userWallet(notDeployer.address);
@@ -398,6 +398,7 @@ describe("JettonMinter", () => {
         let sentAmount = toNano('0.5');
         let forwardAmount = toNano('0.05');
         let forwardPayload = beginCell().storeUint(0x1234567890abcdefn, 128).endCell();
+        //TODO This block checks forward_payload in place (Either bit equals 0)
         const sendResult = await deployerJettonWallet.sendTransfer(deployer.getSender(), toNano('0.1'), //tons
             sentAmount, notDeployer.address,
             deployer.address, null, forwardAmount, forwardPayload);
@@ -414,11 +415,52 @@ describe("JettonMinter", () => {
             from: notDeployerJettonWallet.address,
             to: notDeployer.address,
             value: forwardAmount,
-            body: beginCell().storeUint(Op.transfer_notification, 32).storeUint(0, 64) //default queryId
+            body: beginCell()
+                .storeUint(Op.transfer_notification, 32)
+                .storeUint(0, 64) //default queryId
                 .storeCoins(sentAmount)
                 .storeAddress(deployer.address)
-                .storeUint(0, 1) //TODO modified here cause it serialises directly into cell, not in ref
-                .storeSlice(forwardPayload.beginParse())
+                .storeSlice(forwardPayload.beginParse()) //Doing this because forward_payload is already Cell with 1 bit 1 and one ref.
+                .endCell()
+        });
+        expect(await deployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance - sentAmount);
+        expect(await notDeployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance2 + sentAmount);
+    });
+
+
+    //TODO There was no such test in official implementation
+    it('correctly sends forward_payload in ref', async () => {
+        const deployerJettonWallet = await userWallet(deployer.address);
+        let initialJettonBalance = await deployerJettonWallet.getJettonBalance();
+        const notDeployerJettonWallet = await userWallet(notDeployer.address);
+        let initialJettonBalance2 = await notDeployerJettonWallet.getJettonBalance();
+        let sentAmount = toNano('0.5');
+        let forwardAmount = toNano('0.05');
+        //TODO This block checks forward_payload in separate ref (Either bit equals 1)
+        let forwardPayload = beginCell().storeUint(1, 1).storeRef(beginCell().storeUint(0x1234567890abcdefn, 128).endCell()).endCell();
+
+        const sendResult = await deployerJettonWallet.sendTransfer(deployer.getSender(), toNano('0.1'), //tons
+            sentAmount, notDeployer.address,
+            deployer.address, null, forwardAmount, forwardPayload);
+        expect(sendResult.transactions).toHaveTransaction({ //excesses
+            from: notDeployerJettonWallet.address,
+            to: deployer.address,
+        });
+        /*
+        transfer_notification#7362d09c query_id:uint64 amount:(VarUInteger 16)
+                                      sender:MsgAddress forward_payload:(Either Cell ^Cell)
+                                      = InternalMsgBody;
+        */
+        expect(sendResult.transactions).toHaveTransaction({ //notification
+            from: notDeployerJettonWallet.address,
+            to: notDeployer.address,
+            value: forwardAmount,
+            body: beginCell()
+                .storeUint(Op.transfer_notification, 32)
+                .storeUint(0, 64) //default queryId
+                .storeCoins(sentAmount)
+                .storeAddress(deployer.address)
+                .storeSlice(forwardPayload.beginParse()) //Doing this because forward_payload is already Cell with 1 bit 1 and one ref.
                 .endCell()
         });
         expect(await deployerJettonWallet.getJettonBalance()).toEqual(initialJettonBalance - sentAmount);
@@ -740,7 +782,7 @@ describe("JettonMinter", () => {
         // 5000 gas-units + msg_forward_prices.lump_price + msg_forward_prices.cell_price = 0.0061
         //const fwdFee     = 1464012n;
         //const minimalFee = fwdFee + 10000000n; // toNano('0.0061');
-        const minimalFee = toNano("0.006613999");
+        const minimalFee = toNano("0.006613999"); //TODO new minimal fee
         let discoveryResult = await jettonMinter.sendDiscovery(deployer.getSender(),
             notDeployer.address,
             false,

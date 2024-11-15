@@ -30,24 +30,25 @@ contract JettonWallet with Ownable {
         //however when doing calculations it's value may be negative, so the check is correct
         require(self.balance >= 0, "Invalid balance");
 
+
         //We shouldn't send transfers to masterchain due to higher gas price
         require(parseStdAddress(msg.destination.asSlice()).workchain == 0, "Invalid workchain of destination address");
         let init: StateInit = initOf JettonWallet(msg.destination, self.master);
 
         let wallet_address: Address = contractAddress(init);
         send(SendParameters{
-        to: wallet_address,
-        value: 0,
-        mode: SendRemainingValue,
-        bounce: true,
-        body: TokenTransferInternal {
-        query_id: msg.query_id,
-        amount: msg.amount,
-        from: self.owner,
-        response_destination: msg.response_destination,
-        forward_ton_amount: msg.forward_ton_amount,
-        forward_payload: msg.forward_payload
-        }.toCell(),
+            to: wallet_address,
+            value: 0,
+            mode: SendRemainingValue,
+            bounce: true,
+            body: TokenTransferInternal {
+            query_id: msg.query_id,
+                amount: msg.amount,
+                from: self.owner,
+                response_destination: msg.response_destination,
+                forward_ton_amount: msg.forward_ton_amount,
+                forward_payload: msg.forward_payload
+            }.toCell(),
         code: init.code,
         data: init.data
         }
@@ -78,15 +79,15 @@ contract JettonWallet with Ownable {
         if (msg.forward_ton_amount > 0) {
             msgValue = ((msgValue - msg.forward_ton_amount) - fwd_fee);
             send(SendParameters{
-            to: self.owner,
-            value: msg.forward_ton_amount,
-            mode: SendPayGasSeparately,
-            bounce: false,
-            body: TokenNotification{ // 0x7362d09c -- Remind the new Owner
-            query_id: msg.query_id,
-            amount: msg.amount,
-            from: msg.from,
-            forward_payload: msg.forward_payload
+                to: self.owner,
+                value: msg.forward_ton_amount,
+                mode: SendPayGasSeparately,
+                bounce: false,
+                body: TokenNotification{ // 0x7362d09c -- Remind the new Owner
+                    query_id: msg.query_id,
+                    amount: msg.amount,
+                    from: msg.from,
+                    forward_payload: msg.forward_payload
             }.toCell()
             });
         }
